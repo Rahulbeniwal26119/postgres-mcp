@@ -1,0 +1,6 @@
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
+CREATE ROLE readonly LOGIN PASSWORD 'readonly@userwithpasswordREADONLY$';
+GRANT CONNECT ON DATABASE pagila TO readonly;
+GRANT USAGE ON SCHEMA public TO readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly;
