@@ -3,14 +3,18 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"runtime/debug"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+const maxConns = 2
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -22,7 +26,8 @@ func main() {
 }
 
 func run() error {
-	if os.Getenv("DATABASE_URL") == "" {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
 		return errors.New("DATABASE_URL is not set")
 	}
 
@@ -33,29 +38,46 @@ func run() error {
 	)
 	defer stop()
 
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+	cfg.MaxConns = maxConns
+
+	db, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("create pool: %w", err)
+	}
+	defer db.Close()
+
 	slog.Info("starting", "version", version())
-	return newServer().Run(ctx, &mcp.StdioTransport{})
+	return newServer(db).Run(ctx, &mcp.StdioTransport{})
 }
 
-func newServer() *mcp.Server {
+func newServer(db *pgxpool.Pool) *mcp.Server {
 	s := mcp.NewServer(
 		&mcp.Implementation{Name: "safedb", Version: version()},
 		&mcp.ServerOptions{Logger: slog.Default()},
 	)
+	t := tools{db: db}
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+
 	mcp.AddTool(
 		s,
-		&mcp.Tool{Name: "ping", Description: "Check that the safedb server is alive."},
-		ping,
+		&mcp.Tool{
+			Name:        "list_tables",
+			Description: "List the tables, views and materialized views this database user can read, with their schema. Call this first to find out what data exists.",
+			Annotations: readOnly,
+		},
+		t.listTables,
 	)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "describe_table",
+		Description: "List the columns of one table or view: name, PostgreSQL type, and whether it can be NULL.",
+		Annotations: readOnly,
+	}, t.describeTable)
 	return s
-}
-
-type pingOutput struct {
-	Message string `json:"message"`
-}
-
-func ping(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, pingOutput, error) {
-	return nil, pingOutput{Message: "pong"}, nil
 }
 
 func version() string {
