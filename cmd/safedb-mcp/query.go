@@ -19,6 +19,7 @@ var queryDescription = fmt.Sprintf(
 		"It runs in a READ ONLY transaction with a %s timeout. At most %d rows come back; "+
 		"if truncated is true, aggregate or filter instead of paging. "+
 		"Values are returned as text, the way psql prints them; SQL NULL is null. "+
+		"Columns named like email, phone, address or tax_id come back masked. "+
 		"Use list_tables and describe_table first to find table and column names.",
 	queryTimeout,
 	maxRows,
@@ -60,8 +61,11 @@ func (t tools) query(ctx context.Context, _ *mcp.CallToolRequest, in queryInput)
 		Rows:    [][]any{},
 	}
 
+	redact := make([]func(string) string, len(fields))
+
 	for i, fd := range fields {
 		out.Columns[i] = fd.Name
+		redact[i] = redactorFor(fd.Name)
 	}
 
 	for rows.Next() {
@@ -72,9 +76,14 @@ func (t tools) query(ctx context.Context, _ *mcp.CallToolRequest, in queryInput)
 		raw := rows.RawValues()
 		row := make([]any, len(raw))
 		for i, v := range raw {
-			if v != nil {
-				row[i] = string(v)
+			if v == nil {
+				continue
 			}
+			s := string(v)
+			if redact[i] != nil {
+				s = redact[i](s)
+			}
+			row[i] = s
 		}
 		out.Rows = append(out.Rows, row)
 	}

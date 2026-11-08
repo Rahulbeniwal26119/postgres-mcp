@@ -16,7 +16,9 @@ SELECT c.customer_id, c.store_id, c.first_name, c.last_name,
     repeat('*', greatest(length(a.phone) - 4, 0)) || right(a.phone, 4) AS phone,
     a.city_id, c.active, c.create_date
 FROM customer c
-JOIN address a USING (address_id);
+-- LEFT JOIN on address's primary key: same rows (every customer has an address), but Postgres
+-- can skip address entirely when a query doesn't use phone or city_id.
+LEFT JOIN address a ON a.address_id = c.address_id;
 
 -- Not granted: customer, address, staff (emails, phones, street addresses, password hashes)
 -- and the views built on them: customer_list, staff_list, sales_by_store.

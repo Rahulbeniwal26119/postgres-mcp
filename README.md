@@ -1,6 +1,61 @@
 # safedb-mcp
 
-A read-only Postgres MCP server.
+A read-only Postgres [MCP](https://modelcontextprotocol.io) server, written in Go.
+It lets Claude Code, Codex or any MCP client explore a database and run SQL against it,
+with the database itself deciding what the model may read.
+
+> **Status:** working toward v0.1.0. The server and its guardrails are done;
+> OpenTelemetry tracing and an analyst agent are next.
+
+## Tools
+
+| Tool | Input | Returns |
+|---|---|---|
+| `list_tables` | none | Tables, views and materialized views the role can read (partitions hidden) |
+| `describe_table` | `table`, optionally schema-qualified (`rental`, `public.rental`) | Each column's name, PostgreSQL type and whether it can be NULL |
+| `query` | `sql`, one statement | `columns`, `rows` (values as text, the way psql prints them; NULL as `null`), `truncated`. Columns named like `email`, `phone` or `address` come back masked. |
+
+All three are marked read-only (`readOnlyHint`). Errors, including SQL errors, come back as
+tool errors the model can read and fix.
+
+## Quickstart
+
+You need Docker with Compose, Go 1.27 or newer (Go 1.21+ downloads the right toolchain
+automatically), and Claude Code or the Codex CLI.
+
+```bash
+git clone https://github.com/Rahulbeniwal26119/postgres-mcp.git
+cd postgres-mcp
+docker compose up -d --wait            # Postgres with the Pagila sample database, plus Jaeger
+go build -o safedb-mcp ./cmd/safedb-mcp
+```
+
+The first `docker compose up` loads Pagila, which takes about a minute. `--wait` returns once
+Postgres is ready.
+
+**Claude Code** (run from the repo directory; the server is registered for this project only):
+
+```bash
+claude mcp add safedb -e DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila -- ./safedb-mcp
+claude
+```
+
+**Codex** (its config is global, so give it an absolute path):
+
+```bash
+codex mcp add safedb --env DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila -- "$PWD/safedb-mcp"
+```
+
+Run `/mcp` and check that `safedb` is connected with 3 tools. Then try:
+
+- *What tables exist?*
+- *What columns does rental have?*
+- *Which film categories bring in the most revenue?*
+- *Show me five customers and their emails.* The emails come back masked; see below.
+
+Postgres listens on `127.0.0.1:5433` (so it doesn't clash with a local Postgres on 5432),
+and the Jaeger UI is at <http://localhost:16686>. Both are bound to localhost only.
+`readonly`/`readonly` is a local development password. Don't reuse it anywhere else.
 
 ## Data access: allowlist and masking
 
@@ -14,10 +69,11 @@ The policy lives in the database, so it also protects every other client that us
 |---|---|---|
 | Grants on the role | Postgres (`db/initdb/04-readonly-policy.sql`) | Reading any table or view that isn't explicitly granted |
 | Masking views | Postgres | Raw PII in results: the role reads the view, never the base table |
+| Column-name masking | safedb-mcp | PII columns a grant exposes by mistake, if the name contains `email`, `phone` or `address` (an alias gets past it) |
 | `temp_file_limit` on the role | Postgres | Queries filling the disk with temporary files |
 | `READ ONLY` transaction, rolled back after every call | safedb-mcp | Writes, `SELECT ... FOR UPDATE`, and `SET`s leaking into later calls |
 | 5s `statement_timeout` | safedb-mcp | Long-running queries |
-| 100-row cap (`truncated: true`) | safedb-mcp | Huge results flooding the model's context |
+| 500-row cap (`truncated: true`) | safedb-mcp | Huge results flooding the model's context |
 | One statement per call | pgx (extended protocol) | `COMMIT; ...` escapes from the read-only transaction |
 
 ### The demo policy (Pagila)
@@ -92,6 +148,13 @@ Rules:
 
 ### What masking does and doesn't cover
 
+- **safedb-mcp also masks result columns by name, as a second layer.** Columns whose name contains
+  `email` or `phone` get the same masks as `customer_safe` (first letter and domain; last four digits),
+  and columns whose name contains `address` come back as `[redacted]`. It only sees the result column's
+  name, so an alias (`SELECT email AS x`) or an expression (`SELECT lower(email)`) gets past it.
+  It catches mistakes, such as an accidental grant on a raw table, not someone deliberately
+  working around it. **The database grants are the real protection.**
+- Name matching also hides harmless columns: `store.address_id` comes back as `[redacted]`.
 - Query results are sent to your LLM provider. Masking decides which personal data reaches it;
   unmasked columns (in the demo, first and last names) are sent as they are.
 - The role can't probe masked values with `WHERE email LIKE 'A%'`. Postgres requires `SELECT`
@@ -107,8 +170,46 @@ Masking blocks browsing, not targeted work:
 - **Start from the id.** Get `customer_id` from your admin tool or the ticket, and ask about that id.
 - **Need real emails for support work?** Create a separate role that can read the raw table and
   register it as a second server: same binary, different `DATABASE_URL`. Do this only if your
-  company allows that data to go to your LLM provider.
+  company allows that data to go to your LLM provider. The second layer still masks columns
+  named like `email`, `phone` or `address` in that server's results.
   ```bash
   claude mcp add safedb-support -e DATABASE_URL=postgres://support_ro@localhost:5433/pagila -- ./safedb-mcp
   ```
 - **Engineers who need raw data** use their own credentials in `psql`, ideally against a read replica.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `safedb` shows as failed in `/mcp` | Check that `DATABASE_URL` is set in the `claude mcp add` command and that `./safedb-mcp` exists (rebuild it). |
+| `password authentication failed for user "readonly"` | The password in `DATABASE_URL` doesn't match `db/initdb/03-readonly.sql`. URL-encode special characters (`@` becomes `%40`). |
+| `connect: connection refused` | Postgres isn't running: `docker compose up -d --wait`. The next tool call reconnects; no restart needed. |
+| Edited `db/initdb/*.sql` but nothing changed | Init scripts only run on an empty volume. Re-apply the policy (above), or reset everything with `docker compose down -v && docker compose up -d --wait`. |
+| `could not write to file ... No space left on device` | Docker's disk is full. Check with `docker system df`. |
+| Port 5433 already in use | Change the host port in `compose.yaml` and in `DATABASE_URL`. |
+
+## Development
+
+```bash
+gofmt -l . && go vet ./...
+DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila go test -count=1 ./...
+```
+
+The tests run against the compose database (Pagila plus the demo policy). They are skipped
+when `DATABASE_URL` is not set, except the column-masking unit test, which needs no database.
+The full run takes about 6 seconds, because one test waits for the 5s statement timeout on purpose.
+
+## Project layout
+
+```
+cmd/safedb-mcp/   the server: main.go (wiring), tools.go (list_tables, describe_table), query.go, redact.go, tests
+db/initdb/        run by Postgres on first start: Pagila schema and data, readonly role (03), access policy (04)
+compose.yaml      Postgres 18 with pgvector (Pagila needs it) and Jaeger, bound to localhost
+```
+
+To remove it: `claude mcp remove safedb`, then `docker compose down -v`.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The Pagila sample database ships under its own license,
+see [db/PAGILA-LICENSE.txt](db/PAGILA-LICENSE.txt).

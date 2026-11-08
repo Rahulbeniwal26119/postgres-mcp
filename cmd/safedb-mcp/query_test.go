@@ -64,4 +64,15 @@ func TestQuery(t *testing.T) {
 			t.Errorf("took %v, want about %v", took, queryTimeout)
 		}
 	})
+
+	t.Run("masks columns named like email, phone or address", func(t *testing.T) {
+		var out queryOutput
+		callTool(t, cs, "query", query(`SELECT 'MARY.SMITH@sakilacustomer.org' AS email, '6172235589' AS phone,
+			       '47 MySakila Drive' AS address, 'MARY.SMITH@sakilacustomer.org' AS x`),
+			&out)
+		want := "[[M***@sakilacustomer.org ******5589 [redacted] MARY.SMITH@sakilacustomer.org]]"
+		if got := fmt.Sprint(out.Rows); got != want {
+			t.Errorf("got %s, want %s", got, want)
+		}
+	})
 }
