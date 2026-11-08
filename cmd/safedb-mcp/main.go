@@ -77,6 +77,16 @@ func newServer(db *pgxpool.Pool) *mcp.Server {
 		Description: "List the columns of one table or view: name, PostgreSQL type, and whether it can be NULL.",
 		Annotations: readOnly,
 	}, t.describeTable)
+
+	mcp.AddTool(
+		s,
+		&mcp.Tool{
+			Name:        "query",
+			Description: queryDescription,
+			Annotations: readOnly,
+		},
+		t.query,
+	)
 	return s
 }
 

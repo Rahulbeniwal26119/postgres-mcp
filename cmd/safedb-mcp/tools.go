@@ -10,7 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const queryTimeOut = 5 * time.Second
+const queryTimeout = 5 * time.Second
 
 type tools struct {
 	db *pgxpool.Pool
@@ -39,7 +39,7 @@ WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
 ORDER BY 1, 2`
 
 func (t tools) listTables(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, listTablesOutput, error) {
-	ctx, cancel := context.WithTimeout(ctx, queryTimeOut)
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	rows, _ := t.db.Query(ctx, listTableSQL)
@@ -72,7 +72,7 @@ WHERE a.attrelid = to_regclass($1) AND a.attnum > 0 AND NOT a.attisdropped
 ORDER BY a.attnum`
 
 func (t tools) describeTable(ctx context.Context, _ *mcp.CallToolRequest, in describeTableInput) (*mcp.CallToolResult, describeTableOutput, error) {
-	ctx, cancel := context.WithTimeout(ctx, queryTimeOut)
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	rows, _ := t.db.Query(ctx, describeTableSQL, in.Table)
