@@ -15,10 +15,10 @@ const (
 )
 
 var queryDescription = fmt.Sprintf(
-	"Run one read-only SQL statement (PostgreSQL dialect) and return the rows. " +
-		"It runs in a READ ONLY transaction with a %s timeout. At most %d rows come back; " +
-		"if truncated is true, aggregate or filter instead of paging. " +
-		"Values are returned as text, the way psql prints them; SQL NULL is null. " +
+	"Run one read-only SQL statement (PostgreSQL dialect) and return the rows. "+
+		"It runs in a READ ONLY transaction with a %s timeout. At most %d rows come back; "+
+		"if truncated is true, aggregate or filter instead of paging. "+
+		"Values are returned as text, the way psql prints them; SQL NULL is null. "+
 		"Use list_tables and describe_table first to find table and column names.",
 	queryTimeout,
 	maxRows,
@@ -47,7 +47,7 @@ func (t tools) query(ctx context.Context, _ *mcp.CallToolRequest, in queryInput)
 
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", queryTimeout.Milliseconds())); err != nil {
 		return nil, queryOutput{}, fmt.Errorf("set local statement_timeout %w", err)
-}
+	}
 
 	rows, err := tx.Query(ctx, in.SQL, pgx.QueryResultFormats{pgx.TextFormatCode})
 	if err != nil {

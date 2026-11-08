@@ -69,6 +69,7 @@ const describeTableSQL = `
 SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, NOT a.attnotnull AS nullable
 FROM pg_attribute a
 WHERE a.attrelid = to_regclass($1) AND a.attnum > 0 AND NOT a.attisdropped
+AND has_table_privilege(a.attrelid, 'SELECT')
 ORDER BY a.attnum`
 
 func (t tools) describeTable(ctx context.Context, _ *mcp.CallToolRequest, in describeTableInput) (*mcp.CallToolResult, describeTableOutput, error) {
@@ -81,7 +82,7 @@ func (t tools) describeTable(ctx context.Context, _ *mcp.CallToolRequest, in des
 		return nil, describeTableOutput{}, fmt.Errorf("describe %q: %w", in.Table, err)
 	}
 	if len(cols) == 0 {
-		return nil, describeTableOutput{}, fmt.Errorf("no table or view named %q; call list_tables to see what exists", in.Table)
+		return nil, describeTableOutput{}, fmt.Errorf("no table or view named %q, that you can read; call list_tables to see what exists", in.Table)
 	}
 
 	return nil, describeTableOutput{Columns: cols}, nil
