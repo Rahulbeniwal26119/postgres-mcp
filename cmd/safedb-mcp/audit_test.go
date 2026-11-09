@@ -16,7 +16,7 @@ func TestAuditLog(t *testing.T) {
 	logs := captureLogs(t)
 	cs := newTestSession(t)
 
-	callTool(t, cs, "query", map[string]any{"sql": "SELECT 1 AS n"}, &queryOutput{})
+	callTool(t, cs, "query", map[string]any{"sql": "SELECT 1 AS n FROM pg_sleep(0.05)"}, &queryOutput{})
 	callToolErr(t, cs, "query", map[string]any{"sql": "SELECT nope"})
 	callTool(t, cs, "list_tables", nil, &listTablesOutput{})
 
@@ -25,12 +25,13 @@ func TestAuditLog(t *testing.T) {
 		t.Fatalf("got %d audit lines, want one per call (3):\n%s", len(lines), logs)
 	}
 	ok, failed, list := lines[0], lines[1], lines[2]
-	if ok["tool"] != "query" || fmt.Sprint(ok["args"]) != "map[sql:SELECT 1 AS n]" || ok["rows"] != 1.0 || ok["error"] != nil {
+	if ok["tool"] != "query" || fmt.Sprint(ok["args"]) != "map[sql:SELECT 1 AS n FROM pg_sleep(0.05)]" || ok["rows"] != 1.0 || ok["error"] != nil {
 		t.Errorf("successful query: %v", ok)
 	}
-	if _, timed := ok["duration_ms"]; !timed {
-		t.Errorf("no duration_ms: %v", ok)
+	if ms, _:= ok["duration_ms"].(float64); ms < 50{
+		t.Errorf("duration_ms = %v, want at least 50: wrong unit?", ok["duration_ms"])	
 	}
+
 	if !strings.Contains(fmt.Sprint(failed["error"]), `column "nope" does not exist`) {
 		t.Errorf("failed query should log the SQL error: %v", failed)
 	}

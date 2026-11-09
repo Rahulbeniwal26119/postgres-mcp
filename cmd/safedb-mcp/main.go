@@ -55,13 +55,18 @@ func run() error {
 	defer db.Close()
 
 	slog.Info("starting", "version", version())
-	return newServer(db).Run(ctx, &mcp.StdioTransport{})
+	err = newServer(db).Run(ctx, &mcp.StdioTransport{})
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
+
 }
 
 func newServer(db *pgxpool.Pool) *mcp.Server {
 	s := mcp.NewServer(
 		&mcp.Implementation{Name: "safedb", Version: version()},
-		&mcp.ServerOptions{Logger: slog.Default()},
+		nil,
 	)
 	s.AddReceivingMiddleware(auditLog)
 	t := tools{db: db}

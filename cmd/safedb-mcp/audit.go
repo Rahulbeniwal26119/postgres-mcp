@@ -25,7 +25,7 @@ func auditLog(next mcp.MethodHandler) mcp.MethodHandler {
 		if call, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok {
 			attrs = append(attrs, "tool", call.Name, "args", call.Arguments)
 		}
-		attrs = append(attrs, "duration_ms", float64(time.Since(start).Milliseconds())/1000)
+		attrs = append(attrs, "duration_ms", float64(time.Since(start))/float64(time.Millisecond))
 		if r, ok := res.(*mcp.CallToolResult); ok && r != nil {
 			attrs = append(attrs, resultAttrs(r)...)
 		}
