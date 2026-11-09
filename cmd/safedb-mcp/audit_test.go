@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -93,11 +94,17 @@ func TestStartupErrorReachesAuditLog(t *testing.T) {
 }
 
 // captureLogs sends everything logged through slog during the test to the returned buffer.
+// slog.SetDefault also redirects the log package, so that is restored too, or later tests
+// would keep logging through this test's handler.
 func captureLogs(t *testing.T) *bytes.Buffer {
 	var buf bytes.Buffer
-	prev := slog.Default()
+	prev, prevOut, prevFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+	})
 	return &buf
 }
 

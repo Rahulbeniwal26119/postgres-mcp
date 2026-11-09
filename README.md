@@ -221,18 +221,33 @@ claude mcp add safedb -e DATABASE_URL=postgres://readonly:readonly@localhost:543
 | Edited `db/initdb/*.sql` but nothing changed | Init scripts only run on an empty volume. Re-apply the policy (above), or reset everything with `docker compose down -v && docker compose up -d --wait`. |
 | `could not write to file ... No space left on device` | Docker's disk is full. Check with `docker system df`. |
 | Port 5433 already in use | Change the host port in `compose.yaml` and in `DATABASE_URL`. |
+| `go test`: `rootless Docker not found` / `failed to create Docker provider` | Docker isn't running, or on Colima the two variables in [Development](#development) aren't set. `go test -short ./...` runs the tests that don't need Docker. |
 
 ## Development
 
 ```bash
 gofmt -l . && go vet ./...
-DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila go test -count=1 ./...
+go test ./...          # starts a throwaway Postgres in Docker; about 10 seconds
+go test -short ./...   # skips the database tests: no Docker needed
 ```
 
-The tests run against the compose database (Pagila plus the demo policy). They are skipped
-when `DATABASE_URL` is not set, except the column-masking and logging tests (`TestRedactorFor`,
-`TestConnectionStringNeverLogged`, `TestStartupErrorReachesAuditLog`), which need no database.
-The full run takes about 6 seconds, because one test waits for the 5s statement timeout on purpose.
+`go test` uses [testcontainers-go](https://golang.testcontainers.org) to start a fresh Postgres,
+load `db/initdb` (Pagila, the readonly role and the access policy) and remove it afterwards.
+The tests check the schema and policy committed in the repo, not your local database, and never
+read `DATABASE_URL`. The data lives in memory, so nothing is written to Docker's disk.
+About 5 of the 10 seconds is one test waiting for the 5s statement timeout on purpose.
+
+On Colima, point testcontainers at Colima's Docker (for example in `~/.zshrc`).
+Docker Desktop and Linux need nothing extra.
+
+```bash
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+```
+
+To see each test as it runs, add `-v`. To force a fresh run instead of a cached result, add
+`-count=1`. For coverage, add `-cover`. For 10–15 seconds after a run, `docker ps` shows a
+`testcontainers/ryuk` container. It removes leftover test containers, then itself.
 
 ## Project layout
 

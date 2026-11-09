@@ -42,8 +42,8 @@ func resultAttrs(r *mcp.CallToolResult) []any {
 		return []any{"error", toolText(r)}
 	}
 	var out struct {
-		Rows []json.RawMessage `json:"rows"`
-		Truncate bool `json:"truncated"`
+		Rows     []json.RawMessage `json:"rows"`
+		Truncate bool              `json:"truncated"`
 	}
 	raw, _ := r.StructuredContent.(json.RawMessage)
 	if json.Unmarshal(raw, &out) != nil || out.Rows == nil {

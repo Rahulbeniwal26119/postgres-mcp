@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"slices"
 	"testing"
 
@@ -37,11 +36,10 @@ func TestTools(t *testing.T) {
 // The SQL is the logic under test, so a fake database would prove nothing.
 func newTestSession(t *testing.T) *mcp.ClientSession {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; run `docker compose up -d` and export it")
+	if testDSN == "" {
+		t.Skip("database test; skipped with -short")
 	}
-	db, err := newPool(t.Context(), dsn)
+	db, err := newPool(t.Context(), testDSN)
 	if err != nil {
 		t.Fatal(err)
 	}
