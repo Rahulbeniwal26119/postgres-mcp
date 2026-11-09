@@ -33,3 +33,4 @@ go.work.sum
 # .vscode/
 PROGRESS.md
 /safedb-mcp
+audit.jsonl

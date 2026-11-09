@@ -40,6 +40,9 @@ claude mcp add safedb -e DATABASE_URL=postgres://readonly:readonly@localhost:543
 claude
 ```
 
+To keep a record of every tool call, also pass `-e AUDIT_LOG="$PWD/audit.jsonl"`
+(see [Audit log](#audit-log)).
+
 **Codex** (its config is global, so give it an absolute path):
 
 ```bash
@@ -177,11 +180,42 @@ Masking blocks browsing, not targeted work:
   ```
 - **Engineers who need raw data** use their own credentials in `psql`, ideally against a read replica.
 
+## Audit log
+
+Every tool call writes one JSON line: the tool, its arguments as the model sent them (the SQL,
+for `query`), `duration_ms`, `rows` and `truncated` for queries, and `error` when the call failed.
+
+```json
+{"time":"2026-11-09T14:23:55.416+05:30","level":"INFO","msg":"tool call","tool":"query","args":{"sql":"SELECT count(*) FROM rental"},"duration_ms":42.403125,"rows":1,"truncated":false}
+{"time":"2026-11-09T14:23:57.861+05:30","level":"INFO","msg":"tool call","tool":"query","args":{"sql":"SELECT email FROM customer"},"duration_ms":13.731,"error":"ERROR: permission denied for table customer (SQLSTATE 42501)"}
+```
+
+Logs go to stderr, but Claude Code and Codex don't keep a server's stderr. Set `AUDIT_LOG`
+to also append them to a file:
+
+```bash
+claude mcp add safedb -e DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila \
+  -e AUDIT_LOG="$PWD/audit.jsonl" -- ./safedb-mcp
+```
+
+- **Use an absolute path.** Your shell expands `$PWD` when you run `claude mcp add`. A relative
+  path would resolve against whichever directory the client starts the server in.
+- **Use double quotes.** With single quotes the literal text `$PWD` is saved, and the server
+  fails to start with `open AUDIT_LOG: no such file or directory`.
+- The file is only ever appended to, is created with mode `0600`, and `audit.jsonl` is in `.gitignore`.
+- It contains the model's SQL, which can include values the model typed (a name in a `WHERE`,
+  for example), but never query results.
+- **The connection string is never logged.** An invalid `DATABASE_URL` is reported as
+  `DATABASE_URL is not a valid Postgres connection string`, without repeating the URL.
+
+
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `safedb` shows as failed in `/mcp` | Check that `DATABASE_URL` is set in the `claude mcp add` command and that `./safedb-mcp` exists (rebuild it). |
+| `safedb` shows as failed in `/mcp` | Check that `DATABASE_URL` is set in the `claude mcp add` command and that `./safedb-mcp` exists (rebuild it). With `AUDIT_LOG` set, the reason is in the last line of the file. |
+| `DATABASE_URL is not a valid Postgres connection string` | Check the format: `postgres://user:password@host:port/dbname`. The server doesn't repeat the URL back, so it never ends up in a log. |
+| `open AUDIT_LOG: no such file or directory` | The directory doesn't exist, or the path was saved in single quotes so `$PWD` wasn't expanded. Re-add with `-e AUDIT_LOG="$PWD/audit.jsonl"`. |
 | `password authentication failed for user "readonly"` | The password in `DATABASE_URL` doesn't match `db/initdb/03-readonly.sql`. URL-encode special characters (`@` becomes `%40`). |
 | `connect: connection refused` | Postgres isn't running: `docker compose up -d --wait`. The next tool call reconnects; no restart needed. |
 | Edited `db/initdb/*.sql` but nothing changed | Init scripts only run on an empty volume. Re-apply the policy (above), or reset everything with `docker compose down -v && docker compose up -d --wait`. |
@@ -196,13 +230,14 @@ DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila go test -count=1
 ```
 
 The tests run against the compose database (Pagila plus the demo policy). They are skipped
-when `DATABASE_URL` is not set, except the column-masking unit test, which needs no database.
+when `DATABASE_URL` is not set, except the column-masking and logging tests (`TestRedactorFor`,
+`TestConnectionStringNeverLogged`, `TestStartupErrorReachesAuditLog`), which need no database.
 The full run takes about 6 seconds, because one test waits for the 5s statement timeout on purpose.
 
 ## Project layout
 
 ```
-cmd/safedb-mcp/   the server: main.go (wiring), tools.go (list_tables, describe_table), query.go, redact.go, tests
+cmd/safedb-mcp/   the server: main.go (wiring), tools.go (list_tables, describe_table), query.go, redact.go, audit.go, tests
 db/initdb/        run by Postgres on first start: Pagila schema and data, readonly role (03), access policy (04)
 compose.yaml      Postgres 18 with pgvector (Pagila needs it) and Jaeger, bound to localhost
 ```

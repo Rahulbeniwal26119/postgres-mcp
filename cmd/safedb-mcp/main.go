@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,7 +18,7 @@ import (
 const maxConns = 2
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
 	if err := run(); err != nil {
 		slog.Error("safedb-mcp-exited", "err", err)
@@ -31,6 +32,15 @@ func run() error {
 		return errors.New("DATABASE_URL is not set")
 	}
 
+	// Claude Code and Codex don't keep a server's stderr, so the audit trail needs its own file.
+	if path := os.Getenv("AUDIT_LOG"); path != "" {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("open AUDIT_LOG: %w", err)
+		}
+		slog.SetDefault(slog.New(slog.NewJSONHandler(io.MultiWriter(f, os.Stderr), nil)))
+	}
+
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -38,15 +48,9 @@ func run() error {
 	)
 	defer stop()
 
-	cfg, err := pgxpool.ParseConfig(dsn)
+	db, err := newPool(ctx, dsn)
 	if err != nil {
-		return fmt.Errorf("parse DATABASE_URL: %w", err)
-	}
-	cfg.MaxConns = maxConns
-
-	db, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return fmt.Errorf("create pool: %w", err)
+		return err
 	}
 	defer db.Close()
 
@@ -59,6 +63,7 @@ func newServer(db *pgxpool.Pool) *mcp.Server {
 		&mcp.Implementation{Name: "safedb", Version: version()},
 		&mcp.ServerOptions{Logger: slog.Default()},
 	)
+	s.AddReceivingMiddleware(auditLog)
 	t := tools{db: db}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 
@@ -88,6 +93,15 @@ func newServer(db *pgxpool.Pool) *mcp.Server {
 		t.query,
 	)
 	return s
+}
+
+func newPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, errors.New("DATABASE_URL is not a valid Postgres connection string")
+	}
+	cfg.MaxConns = maxConns
+	return pgxpool.NewWithConfig(ctx, cfg)
 }
 
 func version() string {

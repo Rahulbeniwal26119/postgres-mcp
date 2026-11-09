@@ -41,14 +41,18 @@ func newTestSession(t *testing.T) *mcp.ClientSession {
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set; run `docker compose up -d` and export it")
 	}
-	ctx := t.Context()
-
-	db, err := pgxpool.New(ctx, dsn)
+	db, err := newPool(t.Context(), dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
+	return connectSession(t, db)
+}
 
+// connectSession connects an in-memory MCP client to a server backed by db.
+func connectSession(t *testing.T, db *pgxpool.Pool) *mcp.ClientSession {
+	t.Helper()
+	ctx := t.Context()
 	serverT, clientT := mcp.NewInMemoryTransports()
 	ss, err := newServer(db).Connect(ctx, serverT, nil)
 	if err != nil {
@@ -95,14 +99,4 @@ func callToolErr(t *testing.T, cs *mcp.ClientSession, name string, args any) str
 		return ""
 	}
 	return toolText(res)
-}
-
-func toolText(res *mcp.CallToolResult) string {
-	if len(res.Content) == 0 {
-		return ""
-	}
-	if tc, ok := res.Content[0].(*mcp.TextContent); ok {
-		return tc.Text
-	}
-	return ""
 }
