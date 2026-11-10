@@ -15,6 +15,7 @@ services:
       retries: 60
   jaeger:
     image: jaegertracing/jaeger:2.23.0
+    profiles: ["tracing"]
     ports:
       - "127.0.0.1:16686:16686" # UI
       - "127.0.0.1:4318:4318" # OLTP/HTTP

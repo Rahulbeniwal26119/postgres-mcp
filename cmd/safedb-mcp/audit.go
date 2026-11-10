@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // auditLog writes one JSON line per tool call: the tool, its arguments as the model sent them
 // (the SQL, for query), how long it took, how many rows came back, and the error if it failed.
 // It is middleware, so every tool is audited, including ones added later.
-
 func auditLog(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		if method != "tools/call" {
@@ -24,6 +24,9 @@ func auditLog(next mcp.MethodHandler) mcp.MethodHandler {
 		var attrs []any
 		if call, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok {
 			attrs = append(attrs, "tool", call.Name, "args", call.Arguments)
+		}
+		if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+			attrs = append(attrs, "trace_id", sc.TraceID().String())
 		}
 		attrs = append(attrs, "duration_ms", float64(time.Since(start))/float64(time.Millisecond))
 		if r, ok := res.(*mcp.CallToolResult); ok && r != nil {

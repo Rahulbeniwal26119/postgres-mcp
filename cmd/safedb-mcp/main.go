@@ -10,12 +10,16 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const maxConns = 2
+const (
+	maxConns          = 2
+	traceFlushTimeout = 2 * time.Second
+)
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
@@ -48,6 +52,19 @@ func run() error {
 	)
 	defer stop()
 
+	shutDownTracing, err := setupTracing(ctx)
+	if err != nil {
+		return fmt.Errorf("set up tracing: %w", err)
+	}
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), traceFlushTimeout)
+		defer cancel()
+		if err := shutDownTracing(ctx); err != nil {
+			slog.Warn("flush traces", "err", err)
+		}
+	}()
+
 	db, err := newPool(ctx, dsn)
 	if err != nil {
 		return err
@@ -68,7 +85,7 @@ func newServer(db *pgxpool.Pool) *mcp.Server {
 		&mcp.Implementation{Name: "safedb", Version: version()},
 		nil,
 	)
-	s.AddReceivingMiddleware(auditLog)
+	s.AddReceivingMiddleware(traceToolCalls, auditLog)
 	t := tools{db: db}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 
@@ -106,6 +123,7 @@ func newPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		return nil, errors.New("DATABASE_URL is not a valid Postgres connection string")
 	}
 	cfg.MaxConns = maxConns
+	cfg.ConnConfig.Tracer = sqlTracer{}
 	return pgxpool.NewWithConfig(ctx, cfg)
 }
 

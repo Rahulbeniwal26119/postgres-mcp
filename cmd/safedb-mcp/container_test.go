@@ -11,13 +11,21 @@ import (
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 const postgresImage = "pgvector/pgvector:0.8.7-pg18-trixie"
 
 var testDSN string
 
+// spans records every span the tests create, in memory; TestTracing reads it.
+// Set once here, before any test runs, because the OpenTelemetry tracer provider is global.
+var spans = tracetest.NewSpanRecorder()
+
 func TestMain(m *testing.M) {
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)))
 	flag.Parse()
 	if testing.Short() {
 		os.Exit(m.Run())
@@ -55,7 +63,7 @@ func startPostgres(ctx context.Context) (*postgres.PostgresContainer, string, er
 
 	hostPort, err := ctr.Endpoint(ctx, "")
 	if err != nil {
-		return ctr, "", nil
+		return ctr, "", err
 	}
 
 	return ctr, "postgres://readonly:readonly@" + hostPort + "/pagila", nil
