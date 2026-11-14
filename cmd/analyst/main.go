@@ -1,14 +1,13 @@
 package main
 
 import (
+	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/openai/openai-go/v3"
@@ -17,7 +16,6 @@ import (
 const (
 	defaultClaudeModel = "claude-opus-5-5"
 	maxIterations      = 10
-	fakeRentals        = 7319
 )
 
 func main() {
@@ -34,7 +32,16 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	tools := []tool{rentalCount}
+	session, err := connectMCP(ctx, cmp.Or(os.Getenv("SAFEDB_MCP"), "./safedb-mcp"))
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+
+	tools, err := mcpTools(ctx, session)
+	if err != nil {
+		return err
+	}
 	c, err := newChat(os.Getenv("ANALYST_PROVIDER"), os.Getenv("ANALYST_MODEL"), os.Args[1], tools)
 	if err != nil {
 		return err
@@ -63,26 +70,4 @@ func newChat(provider, model, question string, tools []tool) (chat, error) {
 		return newOpenAIChat(openai.NewClient(), model, question, tools), nil
 	}
 	return nil, fmt.Errorf("ANALYST_PROVIDER is %q, want claude or openai", provider)
-}
-
-var rentalCount = tool{
-	name:        "rental_count",
-	description: "Number of DVD rentals in one month",
-	schema: map[string]any{
-		"type":       "object",
-		"properties": map[string]any{"month": map[string]any{"type": "string", "description": "The month as YYYY-MM, e.g. 2026-11"}},
-		"required":   []string{"month"},
-	},
-	run: func(_ context.Context, input json.RawMessage) (string, error) {
-		var in struct {
-			Month string `json:"month"`
-		}
-		if err := json.Unmarshal(input, &in); err != nil {
-			return "", err
-		}
-		if _, err := time.Parse("2006-01", in.Month); err != nil {
-			return "", fmt.Errorf("month must be YYYY-MM, got %q", in.Month)
-		}
-		return fmt.Sprintf(`{"month": %q, "rentals": %d}`, in.Month, fakeRentals), nil
-	},
 }

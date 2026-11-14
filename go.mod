@@ -3,8 +3,10 @@ module github.com/Rahulbeniwal26119/postgres-mcp
 go 1.27.1
 
 require (
+	github.com/anthropics/anthropic-sdk-go/v2 v2.8.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/openai/openai-go/v3 v3.98.0
 	github.com/testcontainers/testcontainers-go v0.45.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.45.0
 	go.opentelemetry.io/otel v1.47.0
@@ -17,7 +19,6 @@ require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20261006220739-8c912ac31dd4 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/anthropics/anthropic-sdk-go/v2 v2.8.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -56,7 +57,6 @@ require (
 	github.com/moby/sys/user v0.4.1 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/openai/openai-go/v3 v3.98.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect

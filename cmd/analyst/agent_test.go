@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // scriptedChat replays fixed turns, the last one repeating, and records what the loop sent.
@@ -17,6 +19,30 @@ type scriptedChat struct {
 func (c *scriptedChat) send(_ context.Context, results []toolResult) (turn, error) {
 	c.sent = append(c.sent, results)
 	return c.turns[min(len(c.sent), len(c.turns))-1], nil
+}
+
+const fakeRentals = 7319
+
+var rentalCount = tool{
+	name:        "rental_count",
+	description: "Number of DVD rentals in one month",
+	schema: map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"month": map[string]any{"type": "string", "description": "The month as YYYY-MM, e.g. 2026-11"}},
+		"required":   []string{"month"},
+	},
+	run: func(_ context.Context, input json.RawMessage) (string, error) {
+		var in struct {
+			Month string `json:"month"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return "", err
+		}
+		if _, err := time.Parse("2006-01", in.Month); err != nil {
+			return "", fmt.Errorf("month must be YYYY-MM, got %q", in.Month)
+		}
+		return fmt.Sprintf(`{"month": %q, "rentals": %d}`, in.Month, fakeRentals), nil
+	},
 }
 
 func TestAsk(t *testing.T) {
