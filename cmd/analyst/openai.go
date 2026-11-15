@@ -15,8 +15,10 @@ type openaiChat struct {
 
 func newOpenAIChat(client openai.Client, model, question string, tools []tool) *openaiChat {
 	c := &openaiChat{client: client, params: openai.ChatCompletionNewParams{
-		Model:    model,
-		Messages: []openai.ChatCompletionMessageParamUnion{openai.UserMessage(question)},
+		Model: model,
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(systemPrompt),
+			openai.UserMessage(question)},
 	}}
 	for _, t := range tools {
 		c.params.Tools = append(c.params.Tools, openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{

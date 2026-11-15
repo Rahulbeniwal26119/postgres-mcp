@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -93,7 +94,7 @@ func TestAsk(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &scriptedChat{turns: tt.turns}
 
-			got, err := ask(t.Context(), c, []tool{rentalCount}, 3)
+			got, _, err := ask(t.Context(), c, []tool{rentalCount}, 3)
 
 			if got != tt.want || !errMatches(err, tt.wantErr) {
 				t.Errorf("got (%q, %v), want (%q, error containing %q)", got, err, tt.want, tt.wantErr)
@@ -105,6 +106,30 @@ func TestAsk(t *testing.T) {
 				t.Errorf("second request sent %v, want the tool's result %v", c.sent[1], toolRan)
 			}
 		})
+	}
+}
+
+// A bad call goes back to the model as an error result, the model fixes it, and only the
+// call that worked counts as used.
+func TestAskRetriesAfterToolError(t *testing.T) {
+	bad := toolCall{id: "call_1", name: "rental_count", input: json.RawMessage(`{"month":"May 2022"}`)}
+	good := toolCall{id: "call_2", name: "rental_count", input: json.RawMessage(`{"month":"2022-05"}`)}
+	c := &scriptedChat{turns: []turn{
+		{stop: stopToolUse, calls: []toolCall{bad}},
+		{stop: stopToolUse, calls: []toolCall{good}},
+		{stop: stopDone, text: "7319 rentals."},
+	}}
+
+	got, used, err := ask(t.Context(), c, []tool{rentalCount}, maxIterations)
+
+	if got != "7319 rentals." || err != nil {
+		t.Fatalf("got (%q, %v), want the answer", got, err)
+	}
+	if r := c.sent[1]; len(r) != 1 || !r[0].isError {
+		t.Errorf("second request sent %v, want the error result", r)
+	}
+	if !reflect.DeepEqual(used, []toolCall{good}) {
+		t.Errorf("used = %v, want only the call that worked", used)
 	}
 }
 

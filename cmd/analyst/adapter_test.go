@@ -74,10 +74,16 @@ func TestAdapters(t *testing.T) {
 				t.Fatalf("second turn = %+v, %v; want the answer", second, err)
 			}
 
-			// The second request carries the whole conversation: question, tool call, tool result.
-			var req struct{ Messages []json.RawMessage }
-			if err := json.Unmarshal([]byte(bodies[1]), &req); err != nil || len(req.Messages) != 3 || !strings.Contains(bodies[1], tt.wantResult) {
-				t.Errorf("second request should hold 3 messages ending in the tool result %s:\n%s", tt.wantResult, bodies[1])
+			// The second request resends the first one plus the model's tool call and our tool result.
+			var req1, req2 struct{ Messages []json.RawMessage }
+			if err := json.Unmarshal([]byte(bodies[0]), &req1); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(bodies[1]), &req2); err != nil {
+				t.Fatal(err)
+			}
+			if len(req2.Messages) != len(req1.Messages)+2 || !strings.Contains(bodies[1], tt.wantResult) {
+				t.Errorf("second request should resend the first plus the tool call and the result %s:\n%s", tt.wantResult, bodies[1])
 			}
 		})
 	}

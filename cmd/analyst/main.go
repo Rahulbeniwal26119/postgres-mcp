@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,8 @@ import (
 const (
 	defaultClaudeModel = "claude-opus-5-5"
 	maxIterations      = 10
+	systemPrompt       = `You answer questions about a PostgreSQL database using the tools.
+Base the answer only on query results. Reply in a few sentences without SQL; the SQL is shown separately.`
 )
 
 func main() {
@@ -46,12 +49,28 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	answer, err := ask(ctx, c, tools, maxIterations)
+	answer, calls, err := ask(ctx, c, tools, maxIterations)
 	if err != nil {
 		return err
 	}
 	fmt.Println(answer)
+	for _, sql := range sqlOf(calls) {
+		fmt.Printf("\n-- SQL used\n%s\n", sql)
+	}
 	return nil
+}
+
+func sqlOf(calls []toolCall) []string {
+	var sqls []string
+	for _, c := range calls {
+		var in struct {
+			SQL string `json:"sql"`
+		}
+		if c.name == "query" && json.Unmarshal(c.input, &in) == nil {
+			sqls = append(sqls, in.SQL)
+		}
+	}
+	return sqls
 }
 
 // newChat starts a conversation with the provider named by ANALYST_PROVIDER. Each SDK reads

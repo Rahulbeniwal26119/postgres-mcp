@@ -26,7 +26,7 @@ func connectMCP(ctx context.Context, command string) (*mcp.ClientSession, error)
 	return session, nil
 }
 
-func mcpTools (ctx context.Context, s *mcp.ClientSession) ([]tool, error) {
+func mcpTools(ctx context.Context, s *mcp.ClientSession) ([]tool, error) {
 	var tools []tool
 	for t, err := range s.Tools(ctx, nil) {
 		if err != nil {

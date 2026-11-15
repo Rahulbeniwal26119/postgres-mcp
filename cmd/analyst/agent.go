@@ -50,32 +50,38 @@ var errIterationCap = errors.New("iteration cap reached")
 
 // ask runs the conversation tuntil the model answers. Every iteration is one model request,
 // so maxIterations caps the cost of a model that keep calling tools
-func ask(ctx context.Context, c chat, tools []tool, maxIterations int) (string, error) {
+func ask(ctx context.Context, c chat, tools []tool, maxIterations int) (string, []toolCall, error) {
 	byName := make(map[string]tool, len(tools))
 	for _, t := range tools {
 		byName[t.name] = t
 	}
 
 	var results []toolResult
+	var succeeded []toolCall
 	for range maxIterations {
 		t, err := c.send(ctx, results)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		switch t.stop {
 		case stopDone:
-			return t.text, nil
+			return t.text, succeeded, nil
 		case stopToolUse:
 			results = runTools(ctx, t.calls, byName)
+			for i, r := range results {
+				if !r.isError {
+					succeeded = append(succeeded, t.calls[i])
+				}
+			}
 		case stopTruncated:
-			return "", errors.New("answer cut off at the output token limit")
+			return "", nil, errors.New("answer cut off at the output token limit")
 		case stopRefused:
-			return "", fmt.Errorf("the model declined to answer: %s", t.refusal)
+			return "", nil, fmt.Errorf("the model declined to answer: %s", t.refusal)
 		default:
-			return "", fmt.Errorf("unexpected stop reason %q", t.stop)
+			return "", nil, fmt.Errorf("unexpected stop reason %q", t.stop)
 		}
 	}
-	return "", fmt.Errorf("%w: still calling tools after %d requests", errIterationCap, maxIterations)
+	return "", nil, fmt.Errorf("%w: still calling tools after %d requests", errIterationCap, maxIterations)
 }
 
 // runTools retuns one result per call. A failed call go back to the model as an error

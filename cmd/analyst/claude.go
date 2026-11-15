@@ -18,6 +18,7 @@ func newClaudeChat(client anthropic.Client, model, question string, tools []tool
 	c := &claudeChat{client: client, params: anthropic.BetaMessageNewParams{
 		Model:        model,
 		MaxTokens:    claudeMaxTokens,
+		System:       []anthropic.BetaTextBlockParam{{Text: systemPrompt}},
 		OutputConfig: anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffortHigh},
 		Betas:        []anthropic.AnthropicBeta{anthropic.AnthropicBetaServerSideFallback2026_07_01},
 		Fallbacks:    anthropic.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()},
