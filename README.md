@@ -2,10 +2,11 @@
 
 A read-only Postgres [MCP](https://modelcontextprotocol.io) server, written in Go.
 It lets Claude Code, Codex or any MCP client explore a database and run SQL against it,
-with the database itself deciding what the model may read.
+with the database itself deciding what the model may read. It comes with a small
+[analyst agent](#analyst-agent) that uses the server to answer questions from the command line.
 
-> **Status:** working toward v0.1.0. The server and its guardrails are done;
-> OpenTelemetry tracing and an analyst agent are next.
+> **Status:** working toward v0.1.0. The server, its guardrails, tracing and the command-line
+> analyst are done; an eval, an HTTP transport and A2A are next.
 
 ## Tools
 
@@ -26,7 +27,7 @@ automatically), and Claude Code or the Codex CLI.
 ```bash
 git clone https://github.com/Rahulbeniwal26119/postgres-mcp.git
 cd postgres-mcp
-docker compose up -d --wait            # Postgres with the Pagila sample database, plus Jaeger
+docker compose up -d --wait            # Postgres with the Pagila sample database
 go build -o safedb-mcp ./cmd/safedb-mcp
 ```
 
@@ -57,7 +58,7 @@ Run `/mcp` and check that `safedb` is connected with 3 tools. Then try:
 - *Show me five customers and their emails.* The emails come back masked; see below.
 
 Postgres listens on `127.0.0.1:5433` (so it doesn't clash with a local Postgres on 5432),
-and the Jaeger UI is at <http://localhost:16686>. Both are bound to localhost only.
+bound to localhost only.
 `readonly`/`readonly` is a local development password. Don't reuse it anywhere else.
 
 ## Data access: allowlist and masking
@@ -208,6 +209,97 @@ claude mcp add safedb -e DATABASE_URL=postgres://readonly:readonly@localhost:543
 - **The connection string is never logged.** An invalid `DATABASE_URL` is reported as
   `DATABASE_URL is not a valid Postgres connection string`, without repeating the URL.
 
+## Analyst agent
+
+`cmd/analyst` answers one question about the database from the command line. It's a
+hand-written agent loop for the Claude or OpenAI API: it starts `./safedb-mcp` as a child
+process, gives the model the server's tools, runs the tool calls the model asks for, and prints
+the answer with the SQL behind it.
+
+```bash
+go build -o safedb-mcp ./cmd/safedb-mcp                 # the analyst runs this binary
+read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY   # paste the key; it stays out of shell history
+DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila \
+  go run ./cmd/analyst "Which film category brings in the most revenue?"
+```
+
+```
+Action brings in the most revenue, $26,505.44, just ahead of Animation at $26,460.31.
+
+-- SQL used
+SELECT c.name, sum(p.amount) AS revenue FROM payment p JOIN rental r USING (rental_id) JOIN inventory i USING (inventory_id) JOIN film_category fc USING (film_id) JOIN category c USING (category_id) GROUP BY c.name ORDER BY revenue DESC LIMIT 3
+```
+
+The model writes its own SQL, so your wording and query will differ.
+
+- **stdout** has the answer, then every query that succeeded, each under `-- SQL used`.
+  The SQL comes from the calls that actually ran, not from the model's text. A query that
+  failed and was retried isn't listed.
+- **stderr** has safedb-mcp's log, one JSON line per tool call (see [Audit log](#audit-log)),
+  so you can watch the SQL as it runs.
+- **A failed tool call goes back to the model** as an error result: after a wrong column or a
+  denied table, it reads the error, fixes the SQL and tries again.
+- **Limits:** at most 10 model requests per question, then it stops with
+  `iteration cap reached`. Each tool call times out after 30 seconds.
+- The model is told to answer only from query results. Those results go to your LLM provider,
+  as they do with Claude Code; [masking](#data-access-allowlist-and-masking) decides which
+  personal data reaches it.
+
+| Variable | Default | |
+|---|---|---|
+| `ANALYST_PROVIDER` | `claude` | `claude` or `openai` |
+| `ANALYST_MODEL` | `claude-opus-5-5` | Required with `openai` |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | | Read by each provider's SDK |
+| `OPENAI_BASE_URL` | | Any OpenAI-compatible server, such as Ollama, OpenRouter or vLLM |
+| `SAFEDB_MCP` | `./safedb-mcp` | Path to the server binary. **Rebuild it after changing `cmd/safedb-mcp`**: the analyst runs the binary, not the source. |
+| `DATABASE_URL`, `AUDIT_LOG`, `OTEL_*` | | Passed on to safedb-mcp, which inherits the analyst's environment |
+
+## Tracing
+
+Both programs export OpenTelemetry traces when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+Without it, nothing is traced and nothing leaves the process. The standard `OTEL_*` variables
+choose the backend. `compose.yaml` includes Jaeger behind a profile:
+
+```bash
+docker compose --profile tracing up -d --wait   # Jaeger UI at http://localhost:16686, OTLP on localhost:4318
+```
+
+**With the analyst**, each question is one trace across both programs:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila \
+  go run ./cmd/analyst "Which film category brings in the most revenue?"
+```
+
+```
+invoke_agent analyst                     analyst      the whole question
+├─ anthropic.messages.create             analyst      each model request: model, tokens, stop reason
+├─ tools/call query                      safedb-mcp   each tool call
+│  └─ BEGIN / SET / SELECT / ROLLBACK    safedb-mcp   each SQL statement, with its text
+└─ ...
+```
+
+- The analyst sends the trace context to safedb-mcp as `traceparent` in each tool call's `_meta`.
+  The server's audit lines carry the same `trace_id`, so you can go from a log line to its trace.
+- With `ANALYST_PROVIDER=openai`, model requests are HTTP spans (method, URL, status), because
+  the OpenAI SDK has no tracing of its own.
+- **Don't set `OTEL_SERVICE_NAME`.** safedb-mcp inherits it and would report under the same
+  name as the analyst.
+
+**With Claude Code or Codex**, add the variable when you register the server. Unless the client
+sends a trace context in `_meta`, each tool call is its own trace.
+
+```bash
+claude mcp add safedb -e DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 -- ./safedb-mcp
+```
+
+**What spans contain:** the SQL text (`db.query.text`), but never query results. The Claude SDK
+leaves prompts and answers out of its spans by default. Don't set
+`ANTHROPIC_OPEN_TELEMETRY_TRACES_CONTENT_MODE=content`: that would copy prompts, including query
+results, into your tracing backend. If the backend is down, safedb-mcp logs one warning and
+carries on, and the analyst prints `flush traces: ...` when it exits.
 
 ## Troubleshooting
 
@@ -222,6 +314,10 @@ claude mcp add safedb -e DATABASE_URL=postgres://readonly:readonly@localhost:543
 | `could not write to file ... No space left on device` | Docker's disk is full. Check with `docker system df`. |
 | Port 5433 already in use | Change the host port in `compose.yaml` and in `DATABASE_URL`. |
 | `go test`: `rootless Docker not found` / `failed to create Docker provider` | Docker isn't running, or on Colima the two variables in [Development](#development) aren't set. `go test -short ./...` runs the tests that don't need Docker. |
+| Analyst: `start MCP server "./safedb-mcp": fork/exec ./safedb-mcp: no such file or directory` | Build the server (`go build -o safedb-mcp ./cmd/safedb-mcp`) and run the analyst from the repo root, or set `SAFEDB_MCP` to the binary's path. |
+| Analyst: `start MCP server ... calling "initialize": client is closing: EOF` | The server exited at startup. The JSON line above it on stderr says why, usually `DATABASE_URL is not set`. |
+| Analyst: `iteration cap reached: still calling tools after 10 requests` | The model kept calling tools without answering. Ask a narrower question. |
+| No traces in Jaeger | Start Jaeger with `docker compose --profile tracing up -d --wait`, and check that `OTEL_EXPORTER_OTLP_ENDPOINT` is set where the program runs. For Claude Code, that means in the `claude mcp add` command. |
 
 ## Development
 
@@ -236,6 +332,7 @@ load `db/initdb` (Pagila, the readonly role and the access policy) and remove it
 The tests check the schema and policy committed in the repo, not your local database, and never
 read `DATABASE_URL`. The data lives in memory, so nothing is written to Docker's disk.
 About 5 of the 10 seconds is one test waiting for the 5s statement timeout on purpose.
+The analyst's tests use fake model APIs and an in-memory MCP server, so they need no API key.
 
 On Colima, point testcontainers at Colima's Docker (for example in `~/.zshrc`).
 Docker Desktop and Linux need nothing extra.
@@ -252,9 +349,10 @@ To see each test as it runs, add `-v`. To force a fresh run instead of a cached 
 ## Project layout
 
 ```
-cmd/safedb-mcp/   the server: main.go (wiring), tools.go (list_tables, describe_table), query.go, redact.go, audit.go, tests
+cmd/safedb-mcp/   the server: main.go (wiring), tools.go (list_tables, describe_table), query.go, redact.go, audit.go, telemetry.go, tests
+cmd/analyst/      the agent: main.go (CLI), agent.go (loop), claude.go and openai.go (providers), mcp.go (MCP client), telemetry.go, tests
 db/initdb/        run by Postgres on first start: Pagila schema and data, readonly role (03), access policy (04)
-compose.yaml      Postgres 18 with pgvector (Pagila needs it) and Jaeger, bound to localhost
+compose.yaml      Postgres 18 with pgvector (Pagila needs it), and Jaeger under the tracing profile; bound to localhost
 ```
 
 To remove it: `claude mcp remove safedb`, then `docker compose down -v`.

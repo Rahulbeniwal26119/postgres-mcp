@@ -49,7 +49,7 @@ func callTool(s *mcp.ClientSession, name string) func(context.Context, json.RawM
 		if len(input) == 0 {
 			input = json.RawMessage(`{}`)
 		}
-		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: input})
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: input, Meta: traceMeta(ctx)})
 		if err != nil {
 			return "", err
 		}

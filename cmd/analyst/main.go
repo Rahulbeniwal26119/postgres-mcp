@@ -6,12 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/openai/openai-go/v3"
+	oaioption "github.com/openai/openai-go/v3/option"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const (
@@ -19,6 +25,7 @@ const (
 	maxIterations      = 10
 	systemPrompt       = `You answer questions about a PostgreSQL database using the tools.
 Base the answer only on query results. Reply in a few sentences without SQL; the SQL is shown separately.`
+	traceFlushTimeout = 2 * time.Second
 )
 
 func main() {
@@ -35,6 +42,18 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	shutdownTracing, err := setupTracing(ctx)
+	if err != nil {
+		return fmt.Errorf("set up tracing: %w", err)
+	}
+	defer func ()  { 
+		ctx, cancel := context.WithTimeout(context.Background(), traceFlushTimeout)
+		defer cancel()
+		if err := shutdownTracing(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, "flush traces:", err)
+		}
+	}()
+
 	session, err := connectMCP(ctx, cmp.Or(os.Getenv("SAFEDB_MCP"), "./safedb-mcp"))
 	if err != nil {
 		return err
@@ -49,7 +68,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "invoke_agent analyst")
 	answer, calls, err := ask(ctx, c, tools, maxIterations)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.End()
 	if err != nil {
 		return err
 	}
@@ -86,7 +110,14 @@ func newChat(provider, model, question string, tools []tool) (chat, error) {
 		if model == "" {
 			return nil, errors.New("ANALYST_PROVIDER=openai needs ANALYST_MODEL")
 		}
-		return newOpenAIChat(openai.NewClient(), model, question, tools), nil
+		client := openai.NewClient(
+			oaioption.WithHTTPClient(
+				&http.Client{
+					Transport: otelhttp.NewTransport(http.DefaultTransport),
+				},
+			),
+		)
+		return newOpenAIChat(client, model, question, tools), nil
 	}
 	return nil, fmt.Errorf("ANALYST_PROVIDER is %q, want claude or openai", provider)
 }
