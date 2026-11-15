@@ -50,7 +50,7 @@ func (c *claudeChat) send(ctx context.Context, results []toolResult) (turn, erro
 	}
 	c.params.Messages = append(c.params.Messages, resp.ToParam())
 
-	t := turn{stop: claudeStop(resp.StopReason)}
+	t := turn{stop: claudeStop(resp.StopReason), usage: usage{input: resp.Usage.InputTokens, output: resp.Usage.OutputTokens}}
 
 	for _, block := range resp.Content {
 		switch block.Type {

@@ -46,7 +46,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("set up tracing: %w", err)
 	}
-	defer func ()  { 
+	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), traceFlushTimeout)
 		defer cancel()
 		if err := shutdownTracing(ctx); err != nil {
@@ -69,7 +69,7 @@ func run() error {
 		return err
 	}
 	ctx, span := otel.Tracer(tracerName).Start(ctx, "invoke_agent analyst")
-	answer, calls, err := ask(ctx, c, tools, maxIterations)
+	a, err := ask(ctx, c, tools, maxIterations)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 	}
@@ -77,8 +77,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(answer)
-	for _, sql := range sqlOf(calls) {
+	fmt.Println(a.text)
+	for _, sql := range sqlOf(a.calls) {
 		fmt.Printf("\n-- SQL used\n%s\n", sql)
 	}
 	return nil

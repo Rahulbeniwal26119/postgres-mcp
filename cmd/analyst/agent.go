@@ -13,11 +13,20 @@ type chat interface {
 	send(ctx context.Context, results []toolResult) (turn, error)
 }
 
+type usage struct{ input, output int64 }
+
 type turn struct {
 	text    string
 	calls   []toolCall
 	stop    stopReason
 	refusal string
+	usage   usage
+}
+
+type answer struct {
+	text  string
+	calls []toolCall
+	usage usage
 }
 
 type stopReason string
@@ -50,38 +59,41 @@ var errIterationCap = errors.New("iteration cap reached")
 
 // ask runs the conversation tuntil the model answers. Every iteration is one model request,
 // so maxIterations caps the cost of a model that keep calling tools
-func ask(ctx context.Context, c chat, tools []tool, maxIterations int) (string, []toolCall, error) {
+func ask(ctx context.Context, c chat, tools []tool, maxIterations int) (answer, error) {
 	byName := make(map[string]tool, len(tools))
 	for _, t := range tools {
 		byName[t.name] = t
 	}
 
+	var a answer
 	var results []toolResult
-	var succeeded []toolCall
 	for range maxIterations {
 		t, err := c.send(ctx, results)
 		if err != nil {
-			return "", nil, err
+			return a, err
 		}
+		a.usage.input += t.usage.input
+		a.usage.output += t.usage.output
 		switch t.stop {
 		case stopDone:
-			return t.text, succeeded, nil
+			a.text = t.text
+			return a, nil
 		case stopToolUse:
 			results = runTools(ctx, t.calls, byName)
 			for i, r := range results {
 				if !r.isError {
-					succeeded = append(succeeded, t.calls[i])
+					a.calls = append(a.calls, t.calls[i])
 				}
 			}
 		case stopTruncated:
-			return "", nil, errors.New("answer cut off at the output token limit")
+			return a, errors.New("answer cut off at the output token limit")
 		case stopRefused:
-			return "", nil, fmt.Errorf("the model declined to answer: %s", t.refusal)
+			return a, fmt.Errorf("the model declined to answer: %s", t.refusal)
 		default:
-			return "", nil, fmt.Errorf("unexpected stop reason %q", t.stop)
+			return a, fmt.Errorf("unexpected stop reason %q", t.stop)
 		}
 	}
-	return "", nil, fmt.Errorf("%w: still calling tools after %d requests", errIterationCap, maxIterations)
+	return a, fmt.Errorf("%w: still calling tools after %d requests", errIterationCap, maxIterations)
 }
 
 // runTools retuns one result per call. A failed call go back to the model as an error

@@ -50,7 +50,12 @@ func (c *openaiChat) send(ctx context.Context, results []toolResult) (turn, erro
 	choice := resp.Choices[0]
 	c.params.Messages = append(c.params.Messages, choice.Message.ToParam())
 
-	t := turn{text: choice.Message.Content, refusal: choice.Message.Refusal, stop: openaiStop(choice)}
+	t := turn{
+		text:    choice.Message.Content,
+		refusal: choice.Message.Refusal,
+		stop:    openaiStop(choice),
+		usage:   usage{input: resp.Usage.PromptTokens, output: resp.Usage.CompletionTokens},
+	}
 	for _, call := range choice.Message.ToolCalls {
 		t.calls = append(t.calls, toolCall{id: call.ID, name: call.Function.Name, input: json.RawMessage(call.Function.Arguments)})
 	}

@@ -33,7 +33,7 @@ func TestAdapters(t *testing.T) {
 			replies: []string{
 				`{"type":"message","role":"assistant","stop_reason":"tool_use","content":[
 					{"type":"tool_use","id":"call_1","name":"rental_count","input":{"month":"2022-05"}}]}`,
-				`{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"7319 rentals."}]}`,
+				`{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"7319 rentals."}],"usage":{"input_tokens":120,"output_tokens":8}}`,
 			},
 			wantResult: `"tool_use_id":"call_1"`,
 		},
@@ -46,7 +46,7 @@ func TestAdapters(t *testing.T) {
 			replies: []string{
 				`{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
 					{"id":"call_1","type":"function","function":{"name":"rental_count","arguments":"{\"month\":\"2022-05\"}"}}]}}]}`,
-				`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"7319 rentals."}}]}`,
+				`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"7319 rentals."}}],"usage":{"prompt_tokens":120,"completion_tokens":8}}`,
 			},
 			wantResult: `"tool_call_id":"call_1"`,
 		},
@@ -70,8 +70,8 @@ func TestAdapters(t *testing.T) {
 			}
 
 			second, err := c.send(t.Context(), []toolResult{{callID: "call_1", output: "7319"}})
-			if err != nil || second.stop != stopDone || second.text != "7319 rentals." {
-				t.Fatalf("second turn = %+v, %v; want the answer", second, err)
+			if err != nil || second.stop != stopDone || second.text != "7319 rentals." || second.usage != (usage{input: 120, output: 8}) {
+				t.Fatalf("second turn = %+v, %v; want the answer and its token usage", second, err)
 			}
 
 			// The second request resends the first one plus the model's tool call and our tool result.

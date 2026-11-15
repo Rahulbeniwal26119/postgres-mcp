@@ -17,7 +17,7 @@ const tracerName = "github.com/Rahulbeniwal26119/postgres-mcp/cmd/analyst"
 
 func setupTracing(ctx context.Context) (func(context.Context) error, error) {
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
-		return func(context.Context) error {return nil}, nil
+		return func(context.Context) error { return nil }, nil
 	}
 	exporter, err := otlptracehttp.New(ctx)
 	if err != nil {

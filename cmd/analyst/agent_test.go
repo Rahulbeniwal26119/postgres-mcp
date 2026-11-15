@@ -94,10 +94,10 @@ func TestAsk(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &scriptedChat{turns: tt.turns}
 
-			got, _, err := ask(t.Context(), c, []tool{rentalCount}, 3)
+			a, err := ask(t.Context(), c, []tool{rentalCount}, 3)
 
-			if got != tt.want || !errMatches(err, tt.wantErr) {
-				t.Errorf("got (%q, %v), want (%q, error containing %q)", got, err, tt.want, tt.wantErr)
+			if a.text != tt.want || !errMatches(err, tt.wantErr) {
+				t.Errorf("got (%q, %v), want (%q, error containing %q)", a.text, err, tt.want, tt.wantErr)
 			}
 			if len(c.sent) != tt.sends {
 				t.Errorf("sent %d requests, want %d", len(c.sent), tt.sends)
@@ -112,24 +112,28 @@ func TestAsk(t *testing.T) {
 // A bad call goes back to the model as an error result, the model fixes it, and only the
 // call that worked counts as used.
 func TestAskRetriesAfterToolError(t *testing.T) {
+	perRequest := usage{input: 100, output: 10}
 	bad := toolCall{id: "call_1", name: "rental_count", input: json.RawMessage(`{"month":"May 2022"}`)}
 	good := toolCall{id: "call_2", name: "rental_count", input: json.RawMessage(`{"month":"2022-05"}`)}
 	c := &scriptedChat{turns: []turn{
-		{stop: stopToolUse, calls: []toolCall{bad}},
-		{stop: stopToolUse, calls: []toolCall{good}},
-		{stop: stopDone, text: "7319 rentals."},
+		{stop: stopToolUse, calls: []toolCall{bad}, usage: perRequest},
+		{stop: stopToolUse, calls: []toolCall{good}, usage: perRequest},
+		{stop: stopDone, text: "7319 rentals.", usage: perRequest},
 	}}
 
-	got, used, err := ask(t.Context(), c, []tool{rentalCount}, maxIterations)
+	a, err := ask(t.Context(), c, []tool{rentalCount}, maxIterations)
 
-	if got != "7319 rentals." || err != nil {
-		t.Fatalf("got (%q, %v), want the answer", got, err)
+	if a.text != "7319 rentals." || err != nil {
+		t.Fatalf("got (%q, %v), want the answer", a.text, err)
 	}
 	if r := c.sent[1]; len(r) != 1 || !r[0].isError {
 		t.Errorf("second request sent %v, want the error result", r)
 	}
-	if !reflect.DeepEqual(used, []toolCall{good}) {
-		t.Errorf("used = %v, want only the call that worked", used)
+	if !reflect.DeepEqual(a.calls, []toolCall{good}) {
+		t.Errorf("used = %v, want only the call that worked", a.calls)
+	}
+	if a.usage != (usage{input: 300, output: 30}) {
+		t.Errorf("usage: %+v, want the sum of 3 requests", a.usage)
 	}
 }
 
