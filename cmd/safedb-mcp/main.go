@@ -72,7 +72,12 @@ func run() error {
 	defer db.Close()
 
 	slog.Info("starting", "version", version())
-	err = newServer(db).Run(ctx, &mcp.StdioTransport{})
+	if addr := os.Getenv("SAFEDB_HTTP_ADDR"); addr != "" {
+		err = serveHttp(ctx, newServer(db), addr, os.Getenv("SAFEDB_TOKEN"))
+	} else {
+		err = newServer(db).Run(ctx, &mcp.StdioTransport{})
+	}
+
 	if ctx.Err() != nil {
 		return nil
 	}
