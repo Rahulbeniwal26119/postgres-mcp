@@ -36,9 +36,11 @@ func main() {
 }
 
 func run() error {
-	if len(os.Args) != 2 {
-		return errors.New(`usage: analyst "question"`)
+	addr := os.Getenv("ANALYST_A2A_ADDR")
+	if addr == "" && len(os.Args) != 2 {
+		return errors.New(`usage: analyst "question", or set ANALYST_A2A_ADDR to serve over A2A`)
 	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -64,16 +66,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	c, err := newChat(os.Getenv("ANALYST_PROVIDER"), os.Getenv("ANALYST_MODEL"), os.Args[1], tools)
-	if err != nil {
+	provider, model := os.Getenv("ANALYST_PROVIDER"), os.Getenv("ANALYST_MODEL")
+
+	answerFn := func(ctx context.Context, question string) (answer, error) {
+		return answerQuestion(ctx, provider, model, question, tools)
+	}
+
+	if addr != "" {
+		err := serveA2A(ctx, addr, os.Getenv("ANALYST_A2A_TOKEN"), answerFn)
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
-	ctx, span := otel.Tracer(tracerName).Start(ctx, "invoke_agent analyst")
-	a, err := ask(ctx, c, tools, maxIterations)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-	}
-	span.End()
+	a,err := answerFn(ctx, os.Args[1])
 	if err != nil {
 		return err
 	}
@@ -82,6 +88,20 @@ func run() error {
 		fmt.Printf("\n-- SQL used\n%s\n", sql)
 	}
 	return nil
+}
+
+func answerQuestion(ctx context.Context, provider, model, question string, tools []tool) (answer, error) {
+	c, err := newChat(provider, model, question, tools)
+	if err != nil {
+		return answer{}, err
+	}
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "invoke_agent analyst")
+	defer span.End()
+	a, err := ask(ctx, c, tools, maxIterations)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return a, err
 }
 
 func sqlOf(calls []toolCall) []string {

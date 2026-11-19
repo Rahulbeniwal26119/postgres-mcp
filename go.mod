@@ -3,6 +3,7 @@ module github.com/Rahulbeniwal26119/postgres-mcp
 go 1.27.1
 
 require (
+	github.com/a2aproject/a2a-go/v2 v2.8.0
 	github.com/anthropics/anthropic-sdk-go/v2 v2.8.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -84,6 +85,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
