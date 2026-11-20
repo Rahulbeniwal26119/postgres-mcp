@@ -79,7 +79,7 @@ func run() error {
 		}
 		return err
 	}
-	a,err := answerFn(ctx, os.Args[1])
+	a, err := answerFn(ctx, os.Args[1])
 	if err != nil {
 		return err
 	}

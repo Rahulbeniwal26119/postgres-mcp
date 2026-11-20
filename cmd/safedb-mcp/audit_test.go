@@ -28,8 +28,8 @@ func TestAuditLog(t *testing.T) {
 	if ok["tool"] != "query" || fmt.Sprint(ok["args"]) != "map[sql:SELECT 1 AS n FROM pg_sleep(0.05)]" || ok["rows"] != 1.0 || ok["error"] != nil {
 		t.Errorf("successful query: %v", ok)
 	}
-	if ms, _:= ok["duration_ms"].(float64); ms < 50{
-		t.Errorf("duration_ms = %v, want at least 50: wrong unit?", ok["duration_ms"])	
+	if ms, _ := ok["duration_ms"].(float64); ms < 50 {
+		t.Errorf("duration_ms = %v, want at least 50: wrong unit?", ok["duration_ms"])
 	}
 
 	if !strings.Contains(fmt.Sprint(failed["error"]), `column "nope" does not exist`) {
