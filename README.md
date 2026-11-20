@@ -5,8 +5,8 @@ Claude Code, Codex or any MCP client can explore a database and run SQL against 
 database itself deciding what the model may read. Ships with a small
 [analyst agent](#analyst-agent) that uses the server to answer questions from the command line.
 
-> **Status:** working toward v0.1.0. Server, guardrails, tracing, analyst and its
-> [A2A](#a2a) interface are done; release is next.
+> **Status:** v0.1.0, the first release. Tool names and environment variables may still change
+> before 1.0.
 
 ## Tools
 
@@ -53,6 +53,36 @@ Run `/mcp`, check `safedb` is connected with 3 tools, then try:
 
 Postgres listens on `127.0.0.1:5433` (to avoid clashing with a local 5432), localhost only.
 `readonly`/`readonly` is a dev password — don't reuse it.
+
+## HTTP transport
+
+By default, safedb-mcp speaks MCP over stdio — one server process per client. Set `SAFEDB_HTTP_ADDR`
+to expose the same server over Streamable HTTP instead, so multiple clients can share one process.
+A bearer token is required.
+
+```bash
+openssl rand -hex 32                                     # make a token
+read -s SAFEDB_TOKEN && export SAFEDB_TOKEN
+SAFEDB_HTTP_ADDR=127.0.0.1:8787 \
+DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila \
+  ./safedb-mcp
+```
+
+Point a client at it (Claude Code example):
+
+```bash
+claude mcp add --transport http safedb http://127.0.0.1:8787 --header "Authorization: Bearer $SAFEDB_TOKEN"
+```
+
+| Variable | |
+|---|---|
+| `SAFEDB_HTTP_ADDR` | Address to listen on. When set, safedb-mcp serves HTTP instead of stdio. |
+| `SAFEDB_TOKEN` | Bearer token clients must send. Required when `SAFEDB_HTTP_ADDR` is set. |
+
+- **Plain HTTP**, so keep it on `127.0.0.1`. Put it behind a TLS-terminating proxy for remote access.
+- Wrong or missing token → `401`. Server won't start without `SAFEDB_TOKEN`.
+- Sessions idle out after 30 minutes.
+- `DATABASE_URL`, `AUDIT_LOG`, `OTEL_*` all work the same as in stdio mode.
 
 ## Data access: allowlist and masking
 
@@ -354,6 +384,23 @@ export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 
 Flags: `-v` per-test output, `-count=1` to skip cache, `-cover` for coverage. A `testcontainers/ryuk`
 container stays up for ~15s after a run to clean up, then removes itself.
+
+### Eval
+
+`cmd/analyst/eval_test.go` asks the analyst 10 Pagila questions with known answers, using the real
+model, and passes when at least 8 are right. It calls the model API, which costs money, so it's
+skipped unless `ANALYST_EVAL=1`. Unlike the other tests, it uses the Compose Postgres:
+
+```bash
+docker compose up -d --wait
+read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
+ANALYST_EVAL=1 DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila \
+  go test ./cmd/analyst -run TestEval -v -count=1
+```
+
+It builds safedb-mcp itself. `-v` prints a `pass`/`FAIL` line per question with its token counts,
+then the totals. To evaluate another model, set `ANALYST_PROVIDER` and `ANALYST_MODEL` as for the
+[analyst](#analyst-agent).
 
 ## Project layout
 
