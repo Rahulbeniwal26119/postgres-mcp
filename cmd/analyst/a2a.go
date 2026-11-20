@@ -67,7 +67,7 @@ func agentCard(url string) *a2a.AgentCard {
 		Skills: []a2a.AgentSkill{{
 			ID:          "answer_data_question",
 			Name:        "Answer a data question",
-			Description: "Explores the schema, writes and run SQL",
+			Description: "Explores the schema, writes and runs SQL",
 			Tags:        []string{"sql", "postgres", "analytics"},
 			Examples:    []string{"Which film category brings in the most revenue?", "How many rentals have not been returned yet?"},
 		}},
