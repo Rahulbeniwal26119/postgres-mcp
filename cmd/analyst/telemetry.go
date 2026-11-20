@@ -28,6 +28,7 @@ func setupTracing(ctx context.Context) (func(context.Context) error, error) {
 		sdktrace.WithResource(resource.NewSchemaless(semconv.ServiceName("analyst"))),
 	)
 	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 	return tp.Shutdown, nil
 }
 

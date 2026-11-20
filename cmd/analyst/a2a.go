@@ -15,6 +15,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/limiter"
 	"github.com/modelcontextprotocol/go-sdk/auth"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
@@ -51,9 +52,8 @@ func a2aHandler(card *a2a.AgentCard, token string, answerFn answerFunc) http.Han
 	requests := a2asrv.NewHandler(executor(answerFn), a2asrv.WithConcurrencyConfig(limiter.ConcurrencyConfig{MaxExecutions: maxConcurrentTasks}))
 	mux := http.NewServeMux()
 	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(card))
-	mux.Handle(a2aPath, requireToken(token, a2asrv.NewJSONRPCHandler(requests)))
+	mux.Handle(a2aPath, otelhttp.NewHandler(requireToken(token, a2asrv.NewJSONRPCHandler(requests)), "a2a"))
 	return mux
-
 }
 
 func agentCard(url string) *a2a.AgentCard {

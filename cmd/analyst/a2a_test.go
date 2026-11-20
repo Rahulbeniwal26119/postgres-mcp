@@ -12,6 +12,9 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestA2A(t *testing.T) {
@@ -66,6 +69,36 @@ func TestA2A(t *testing.T) {
 	task = send("Something the agent can't answer")
 	if task.Status.State != a2a.TaskStateFailed || !strings.Contains(task.Status.Message.Parts[0].Text(), "iteration cap") {
 		t.Errorf("task = %+v; want failed with the reason", task.Status)
+	}
+}
+
+func A2ATraceContext(t *testing.T) {
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	var got trace.SpanContext
+	answerFn := func(ctx context.Context, _ string) (answer, error) {
+		got = trace.SpanContextFromContext(ctx)
+		return answer{text: "ok"}, nil
+	}
+	srv := httptest.NewServer(a2aHandler(agentCard("http://unused"), "test-token", answerFn))
+	t.Cleanup(srv.Close)
+
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4732"
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m1","role":"ROLE_USER","parts":[{"text":"hi"}]}}}`
+	req, err := http.NewRequest(http.MethodPost, srv.URL+a2aPath, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("A2A-Version", "1.0")
+	req.Header.Set("traceparent", "00-"+traceID+"-00f067aa0ba902b7-01")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || got.TraceID().String() != traceID {
+		t.Errorf("status %d, agent ran in trace %s; want 200 and the caller's trace %s", resp.StatusCode, got.TraceID(), traceID)
 	}
 }
 
