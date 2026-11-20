@@ -5,8 +5,8 @@ It lets Claude Code, Codex or any MCP client explore a database and run SQL agai
 with the database itself deciding what the model may read. It comes with a small
 [analyst agent](#analyst-agent) that uses the server to answer questions from the command line.
 
-> **Status:** working toward v0.1.0. The server, its guardrails, tracing and the command-line
-> analyst are done; an eval, an HTTP transport and A2A are next.
+> **Status:** working toward v0.1.0. The server, its guardrails, tracing, the analyst and its
+> [A2A](#a2a) interface are done; the release is next.
 
 ## Tools
 
@@ -254,9 +254,59 @@ The model writes its own SQL, so your wording and query will differ.
 | `SAFEDB_MCP` | `./safedb-mcp` | Path to the server binary. **Rebuild it after changing `cmd/safedb-mcp`**: the analyst runs the binary, not the source. |
 | `DATABASE_URL`, `AUDIT_LOG`, `OTEL_*` | | Passed on to safedb-mcp, which inherits the analyst's environment |
 
+## A2A
+
+The analyst can also run as an [A2A](https://a2a-protocol.org) agent, so other agents can send
+it questions over HTTP. `examples/a2a-client` is a small client that asks one question and
+prints the answer with the SQL behind it. Use two terminals, both in the repo directory.
+
+**Terminal 1, the agent.** It keeps running until you press Ctrl-C.
+
+```bash
+docker compose up -d --wait                              # Postgres, if it isn't running
+go build -o safedb-mcp ./cmd/safedb-mcp                  # the analyst runs this binary
+read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY    # paste the key
+openssl rand -hex 32                                     # make a token, then copy it
+read -s ANALYST_A2A_TOKEN && export ANALYST_A2A_TOKEN    # paste the token
+ANALYST_A2A_ADDR=127.0.0.1:9000 \
+DATABASE_URL=postgres://readonly:readonly@localhost:5433/pagila \
+  go run ./cmd/analyst
+```
+
+It's ready when it prints `A2A agent card at http://127.0.0.1:9000/.well-known/agent-card.json`.
+
+**Terminal 2, the client:**
+
+```bash
+read -s ANALYST_A2A_TOKEN && export ANALYST_A2A_TOKEN    # paste the same token
+go run ./examples/a2a-client "Which film category brings in the most revenue?"
+```
+
+The output looks the same as the command-line analyst's: the answer, then each query under
+`-- SQL used`. A spinner runs on stderr while the agent works. The client gives up after 2 minutes.
+
+For OpenAI, export `OPENAI_API_KEY` in terminal 1 instead, and add
+`ANALYST_PROVIDER=openai ANALYST_MODEL=gpt-5` to the agent's command.
+
+- **The agent card is public**, at `/.well-known/agent-card.json`. It tells the client where to
+  send messages (`/invoke`) and that they need a bearer token. A request to `/invoke` without
+  the right token gets `401`. The agent won't start without `ANALYST_A2A_TOKEN`.
+- **The reply is a task** whose artifact has two parts: the answer as text, and the queries as
+  data, `{"sql": [...]}`.
+- **At most 4 questions run at once.** More are rejected, not queued.
+- **The agent serves plain HTTP**, so keep it on `127.0.0.1`. To reach it from another machine,
+  put it behind a proxy that terminates TLS.
+
+| Variable | Used by | Default | |
+|---|---|---|---|
+| `ANALYST_A2A_ADDR` | agent | | Address to listen on. When set, the analyst serves A2A instead of answering one question. |
+| `ANALYST_A2A_TOKEN` | both | | Bearer token the client sends and the agent checks. Required. |
+| `ANALYST_A2A_URL` | client | `http://localhost:9000` | Where the agent runs. The client fetches the agent card from here. |
+
 ## Tracing
 
-Both programs export OpenTelemetry traces when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+safedb-mcp, the analyst and the A2A client export OpenTelemetry traces when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 Without it, nothing is traced and nothing leaves the process. The standard `OTEL_*` variables
 choose the backend. `compose.yaml` includes Jaeger behind a profile:
 
@@ -286,6 +336,23 @@ invoke_agent analyst                     analyst      the whole question
   the OpenAI SDK has no tracing of its own.
 - **Don't set `OTEL_SERVICE_NAME`.** safedb-mcp inherits it and would report under the same
   name as the analyst.
+
+**With the [A2A client](#a2a)**, export `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` in
+both terminals. Each question is then one trace across all three programs. In Jaeger, pick the
+service `a2a-client`:
+
+```
+invoke_agent safedb analyst              a2a-client   the whole question, as the client sees it
+└─ HTTP POST                             a2a-client   the A2A request; carries traceparent
+   └─ POST /invoke                       analyst      the same request, on the agent's side
+      └─ invoke_agent analyst            analyst
+         ├─ anthropic.messages.create    analyst
+         └─ tools/call query             safedb-mcp
+            └─ BEGIN / SET / SELECT / ROLLBACK
+```
+
+A request rejected for a wrong token is traced too, with errors on the client's spans and on
+`POST /invoke`.
 
 **With Claude Code or Codex**, add the variable when you register the server. Unless the client
 sends a trace context in `_meta`, each tool call is its own trace.
@@ -317,6 +384,10 @@ carries on, and the analyst prints `flush traces: ...` when it exits.
 | Analyst: `start MCP server "./safedb-mcp": fork/exec ./safedb-mcp: no such file or directory` | Build the server (`go build -o safedb-mcp ./cmd/safedb-mcp`) and run the analyst from the repo root, or set `SAFEDB_MCP` to the binary's path. |
 | Analyst: `start MCP server ... calling "initialize": client is closing: EOF` | The server exited at startup. The JSON line above it on stderr says why, usually `DATABASE_URL is not set`. |
 | Analyst: `iteration cap reached: still calling tools after 10 requests` | The model kept calling tools without answering. Ask a narrower question. |
+| Analyst: `ANALYST_A2A_TOKEN must be set when ANALYST_A2A_ADDR is` | Export the token in the agent's terminal (see [A2A](#a2a)). |
+| A2A client: `fetch the agent card: ... connection refused` | The agent isn't running, or runs on another address. Start it with `ANALYST_A2A_ADDR`, or point the client at it with `ANALYST_A2A_URL`. |
+| A2A client: `send message: unexpected HTTP status: 401 Unauthorized` | The token isn't exported in the client's terminal, or doesn't match the agent's. |
+| A2A client: `task TASK_STATE_FAILED: ...` | The agent took the question but couldn't answer it. The reason follows. A provider `401` means the API key isn't exported in the agent's terminal. |
 | No traces in Jaeger | Start Jaeger with `docker compose --profile tracing up -d --wait`, and check that `OTEL_EXPORTER_OTLP_ENDPOINT` is set where the program runs. For Claude Code, that means in the `claude mcp add` command. |
 
 ## Development
@@ -350,7 +421,8 @@ To see each test as it runs, add `-v`. To force a fresh run instead of a cached 
 
 ```
 cmd/safedb-mcp/   the server: main.go (wiring), tools.go (list_tables, describe_table), query.go, redact.go, audit.go, telemetry.go, tests
-cmd/analyst/      the agent: main.go (CLI), agent.go (loop), claude.go and openai.go (providers), mcp.go (MCP client), telemetry.go, tests
+cmd/analyst/      the agent: main.go (CLI), agent.go (loop), claude.go and openai.go (providers), mcp.go (MCP client), a2a.go (A2A server), telemetry.go, tests
+examples/         a2a-client: asks the analyst one question over A2A
 db/initdb/        run by Postgres on first start: Pagila schema and data, readonly role (03), access policy (04)
 compose.yaml      Postgres 18 with pgvector (Pagila needs it), and Jaeger under the tracing profile; bound to localhost
 ```
