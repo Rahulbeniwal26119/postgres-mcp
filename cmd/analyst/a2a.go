@@ -105,6 +105,7 @@ func executor(answerFn answerFunc) a2asrv.AgentExecutorFunc {
 			a, err := answerFn(ctx, question)
 			if err != nil {
 				yield(failed(ec, err.Error()), nil)
+				return
 			}
 			sql := a2a.NewDataPart(map[string]any{"sql": sqlOf(a.calls)})
 			if !yield(a2a.NewArtifactEvent(ec, a2a.NewTextPart(a.text), sql), nil) {

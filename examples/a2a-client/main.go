@@ -70,7 +70,7 @@ func run() error {
 		return err
 	}
 
-	ctx, span := otel.Tracer("a2a-client").Start(ctx, "invoke_agent"+card.Name, trace.WithSpanKind(trace.SpanKindClient))
+	ctx, span := otel.Tracer("a2a-client").Start(ctx, "invoke_agent "+card.Name, trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 	spinCtx, stopSpin := context.WithCancel(ctx)
 	go spinner(spinCtx, "thinking")
