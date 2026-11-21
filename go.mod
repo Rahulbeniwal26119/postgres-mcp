@@ -2,6 +2,8 @@ module github.com/Rahulbeniwal26119/postgres-mcp
 
 go 1.27.1
 
+toolchain go1.27.4
+
 require (
 	github.com/a2aproject/a2a-go/v2 v2.8.0
 	github.com/anthropics/anthropic-sdk-go/v2 v2.8.0
