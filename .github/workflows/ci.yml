@@ -19,7 +19,7 @@ jobs:
                 go-version-file: go.mod
             
             - name: gofmt
-              run: test -z "$(gofmt -l . | tee /dev/stderr)
+              run: test -z "$(gofmt -l . | tee /dev/stderr)"
             
             - name: go mod tidy
               run: go mod tidy -diff
